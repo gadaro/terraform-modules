@@ -151,7 +151,7 @@ resource "aws_autoscaling_schedule" "scale_out_during_business_hours" {
   desired_capacity       = 4
   recurrence             = "0 9 * * *"
 
-  autoscaling_group_name = "${module.webserver_cluster.asg_name}"
+  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
 }
 
 resource "aws_autoscaling_schedule" "scale_in_at_night" {
@@ -163,5 +163,5 @@ resource "aws_autoscaling_schedule" "scale_in_at_night" {
   desired_capacity       = 2
   recurrence             = "0 17 * * *"
 
-  autoscaling_group_name = "${module.webserver_cluster.asg_name}"
+  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
 }
