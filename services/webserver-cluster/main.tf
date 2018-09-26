@@ -14,12 +14,23 @@ data "terraform_remote_state" "db" {
   }
 }
 data "template_file" "user_data" {
+  count = "${1 - var.enable_new_user_data}"
+
   template             = "${file("${path.module}/user_data.sh")}"
 
   vars {
     server_port        = "${var.server_port}"
     db_address         = "${data.terraform_remote_state.db.address}"
     db_port            = "${data.terraform_remote_state.db.port}"
+  }
+}
+data "template_file" "user_data_new" {
+  count = "${var.enable_new_user_data}"
+
+  template             = "${file("${path.module}/user-data-new.sh")}"
+
+  vars {
+    server_port        = "${var.server_port}"
   }
 }
 
@@ -57,6 +68,8 @@ resource "aws_lb_target_group" "example" {
     }
 }
 
+# Autoscaling ------------------------------------------------------------------
+
 resource "aws_autoscaling_group" "example" {
     launch_configuration = "${aws_launch_configuration.example.id}"
     availability_zones   = ["${data.aws_availability_zones.all.names}"]
@@ -77,14 +90,43 @@ resource "aws_launch_configuration" "example" {
     instance_type   = "${var.instance_type}"
     key_name        = "terraform-key"
     security_groups = ["${aws_security_group.instance.id}"]
-    # Rendered template file, replaced variables
-    user_data = "${data.template_file.user_data.rendered}"
+    /* Rendered template file, replaced variables. Concat combines the two user_data
+    lists, one of 0 length and one of 1 length. The last 0 returns the first element
+    of the result of concat function */
+    user_data = "${element(concat(data.template_file.user_data.*.rendered,
+      data.template_file.user_data_new.*.rendered),0)}"
 
     # Creates a new launch configuration before destoying the former one
     lifecycle {
       create_before_destroy = true
     }
 }
+
+resource "aws_autoscaling_schedule" "scale_out_during_business_hours" {
+  count = "${var.enable_autoscaling}"
+
+  scheduled_action_name  = "scale_out_during_business_hours"
+  min_size               = 2
+  max_size               = 4
+  desired_capacity       = 4
+  recurrence             = "0 9 * * *"
+
+  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
+}
+
+resource "aws_autoscaling_schedule" "scale_in_at_night" {
+  count = "${var.enable_autoscaling}"
+
+  scheduled_action_name  = "scale_in_at_night"
+  min_size               = 2
+  max_size               = 4
+  desired_capacity       = 2
+  recurrence             = "0 17 * * *"
+
+  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
+}
+
+# Security groups --------------------------------------------------------------
 
 resource "aws_security_group" "instance" {
     name = "${var.cluster_name}-i-sg"
@@ -142,26 +184,41 @@ resource "aws_security_group_rule" "allow_all_outbound_lb" {
     cidr_blocks       = ["0.0.0.0/0"]
 }
 
-resource "aws_autoscaling_schedule" "scale_out_during_business_hours" {
-  count = "${var.enable_autoscaling}"
+# Alarms -----------------------------------------------------------------------
 
-  scheduled_action_name  = "scale_out_during_business_hours"
-  min_size               = 2
-  max_size               = 4
-  desired_capacity       = 4
-  recurrence             = "0 9 * * *"
+resource "aws_cloudwatch_metric_alarm" "high_cpu_utilization" {
+    alarm_name = "${var.cluster_name}-high-cpu-utilization"
+    namespace = "AWS/EC2"
+    metric_name = "CPUUtilization"
 
-  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
+    dimensions = {
+      AutoScalingGroupName = "${aws_autoscaling_group.example.name}"
+    }
+
+    comparison_operator = "GreaterThanThreshold"
+    evaluation_periods  = 1
+    period              = 300
+    statistic           = "Average"
+    threshold           = 90
+    unit                = "Percent"
 }
 
-resource "aws_autoscaling_schedule" "scale_in_at_night" {
-  count = "${var.enable_autoscaling}"
+resource "aws_cloudwatch_metric_alarm" "low_cpu_credit_balance" {
+    # Extracts the first char of var.instance_type
+    count = "${format("%.1s", var.instance_type) == "t" ? 1 : 0}"
 
-  scheduled_action_name  = "scale_in_at_night"
-  min_size               = 2
-  max_size               = 4
-  desired_capacity       = 2
-  recurrence             = "0 17 * * *"
+    alarm_name = "${var.cluster_name}-low-cpu-credit-balance"
+    namespace = "AWS/EC2"
+    metric_name = "CPUCreditBalance"
 
-  autoscaling_group_name = "${aws_autoscaling_group.example.name}"
+    dimensions = {
+      AutoScalingGroupName = "${aws_autoscaling_group.example.name}"
+    }
+
+    comparison_operator = "LessThanThreshold"
+    evaluation_periods  = 1
+    period              = 300
+    statistic           = "Minimum"
+    threshold           = 10
+    unit                = "Count"
 }
