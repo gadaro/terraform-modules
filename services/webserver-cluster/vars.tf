@@ -8,6 +8,16 @@ variable "lb_port" {
   default     = "80"
 }
 
+variable "ami" {
+  description = "The AMI to run in the cluster"
+  default     = "ami-06340c8c12baa6a09"
+}
+
+variable "server_text" {
+  description = "Additional text for the index page"
+  default     = "<h3>Default additonal text</h3>"
+}
+
 variable "cluster_name" {
   description = "The name to use for all the cluster resources"
 }

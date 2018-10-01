@@ -22,6 +22,7 @@ data "template_file" "user_data" {
     server_port        = "${var.server_port}"
     db_address         = "${data.terraform_remote_state.db.address}"
     db_port            = "${data.terraform_remote_state.db.port}"
+    additional_text    = "${var.server_text}"
   }
 }
 data "template_file" "user_data_new" {
@@ -86,7 +87,7 @@ resource "aws_autoscaling_group" "example" {
 }
 
 resource "aws_launch_configuration" "example" {
-    image_id        = "ami-06340c8c12baa6a09"
+    image_id        = "${var.ami}"
     instance_type   = "${var.instance_type}"
     key_name        = "terraform-key"
     security_groups = ["${aws_security_group.instance.id}"]
